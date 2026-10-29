@@ -1,0 +1,267 @@
+{
+  "info": {
+    "name": "ShopExpress",
+    "description": "Correr en orden, con docker compose arriba. La env local apunta a localhost:8001, 8002 y 8003.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "usuariosUrl", "value": "http://localhost:8001"},
+    {"key": "catalogoUrl", "value": "http://localhost:8002"},
+    {"key": "pedidosUrl", "value": "http://localhost:8003"}
+  ],
+  "item": [
+    {
+      "name": "Health usuarios",
+      "request": {"method": "GET", "url": "{{usuariosUrl}}/health"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('ok', function () { pm.response.to.have.status(200); });"]}}]
+    },
+    {
+      "name": "Health catalogo",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/health"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('ok', function () { pm.response.to.have.status(200); });"]}}]
+    },
+    {
+      "name": "Health pedidos",
+      "request": {"method": "GET", "url": "{{pedidosUrl}}/health"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('ok', function () { pm.response.to.have.status(200); });"]}}]
+    },
+    {
+      "name": "Crear usuario",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"tipo_documento\": \"DNI\",\n  \"nro_documento\": \"{{$guid}}\",\n  \"nombre\": \"Juan\",\n  \"apellido\": \"Pérez\",\n  \"email\": \"juan.{{$guid}}@example.com\",\n  \"direcciones\": [{\"calle\": \"Av. Principal 123\", \"ciudad\": \"Montevideo\", \"codigo_postal\": \"11000\"}]\n}"},
+        "url": "{{usuariosUrl}}/api/usuarios"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('creado', function () {",
+        "  pm.response.to.have.status(201);",
+        "  var b = pm.response.json();",
+        "  pm.expect(b.direcciones.length).to.eql(1);",
+        "  pm.environment.set('usuarioId', b.id);",
+        "  pm.collectionVariables.set('usuarioId', b.id);",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Crear producto A",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"nombre\": \"Auriculares Bluetooth\",\n  \"descripcion\": \"Auriculares inalámbricos\",\n  \"precio\": \"25.50\",\n  \"categoria_id\": \"cat_audio\",\n  \"categoria_nombre\": \"Audio\",\n  \"marca_id\": \"marca_01\",\n  \"marca_nombre\": \"Acme\",\n  \"stock_inicial\": 10\n}"},
+        "url": "{{catalogoUrl}}/api/productos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('creado', function () {",
+        "  pm.response.to.have.status(201);",
+        "  var b = pm.response.json();",
+        "  pm.expect(b.disponible).to.eql(10);",
+        "  pm.expect(b.categoria_id).to.eql('cat_audio');",
+        "  pm.environment.set('productoA', b.id);",
+        "  pm.collectionVariables.set('productoA', b.id);",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Crear producto B relacionado con A",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"nombre\": \"Estuche\",\n  \"descripcion\": \"Estuche para auriculares\",\n  \"precio\": \"10.00\",\n  \"categoria_id\": \"cat_audio\",\n  \"categoria_nombre\": \"Audio\",\n  \"marca_id\": \"marca_01\",\n  \"marca_nombre\": \"Acme\",\n  \"stock_inicial\": 5,\n  \"relacionados\": [\"{{productoA}}\"]\n}"},
+        "url": "{{catalogoUrl}}/api/productos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('creado', function () {",
+        "  pm.response.to.have.status(201);",
+        "  pm.environment.set('productoB', pm.response.json().id);",
+        "  pm.collectionVariables.set('productoB', pm.response.json().id);",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "GET producto A con stock",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoA}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('stock inicial', function () {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().disponible).to.eql(10);",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "GET relacionados de B",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoB}}/relacionados"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('relacion con A', function () {",
+        "  pm.response.to.have.status(200);",
+        "  var ids = pm.response.json().relacionados.map(function (item) { return item.id; });",
+        "  pm.expect(ids).to.include(pm.environment.get('productoA') || pm.collectionVariables.get('productoA'));",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Pedido exitoso",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "var clave = 'idem-' + pm.variables.replaceIn('{{$guid}}');",
+          "pm.environment.set('idemKey', clave);",
+          "pm.collectionVariables.set('idemKey', clave);"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.test('confirmado', function () {",
+          "  pm.response.to.have.status(200);",
+          "  var b = pm.response.json();",
+          "  pm.expect(b.estado).to.eql('CONFIRMADO');",
+          "  pm.expect(b.pago.estado_pago).to.eql('APROBADO');",
+          "  pm.expect(b.total).to.eql(51);",
+          "  pm.environment.set('pedidoId', b.pedido_id);",
+          "  pm.collectionVariables.set('pedidoId', b.pedido_id);",
+          "  pm.environment.set('txId', b.pago.transaccion_id);",
+          "  pm.collectionVariables.set('txId', b.pago.transaccion_id);",
+          "});"
+        ]}}
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Idempotency-Key", "value": "{{idemKey}}"}
+        ],
+        "body": {"mode": "raw", "raw": "{\n  \"usuario_id\": \"{{usuarioId}}\",\n  \"items\": [{\"producto_id\": \"{{productoA}}\", \"cantidad\": 2}],\n  \"pago\": {\"metodo\": \"TARJETA_CREDITO\"}\n}"},
+        "url": "{{pedidosUrl}}/api/pedidos"
+      }
+    },
+    {
+      "name": "GET pedido",
+      "request": {"method": "GET", "url": "{{pedidosUrl}}/api/pedidos/{{pedidoId}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('confirmado', function () {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().estado).to.eql('CONFIRMADO');",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "GET usuario con historial",
+      "request": {"method": "GET", "url": "{{usuariosUrl}}/api/usuarios/{{usuarioId}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('historial', function () {",
+        "  pm.response.to.have.status(200);",
+        "  var ids = pm.response.json().historial_compras.map(function (item) { return item.pedido_id; });",
+        "  pm.expect(ids).to.include(pm.environment.get('pedidoId') || pm.collectionVariables.get('pedidoId'));",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Stock de A despues del pedido",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoA}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('desconto 2', function () { pm.expect(pm.response.json().disponible).to.eql(8); });"
+      ]}}]
+    },
+    {
+      "name": "Reintentar el mismo pedido",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Idempotency-Key", "value": "{{idemKey}}"}
+        ],
+        "body": {"mode": "raw", "raw": "{\n  \"usuario_id\": \"{{usuarioId}}\",\n  \"items\": [{\"producto_id\": \"{{productoA}}\", \"cantidad\": 2}],\n  \"pago\": {\"metodo\": \"TARJETA_CREDITO\"}\n}"},
+        "url": "{{pedidosUrl}}/api/pedidos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('mismo pedido y mismo cobro', function () {",
+        "  var b = pm.response.json();",
+        "  pm.expect(b.pedido_id).to.eql(pm.environment.get('pedidoId') || pm.collectionVariables.get('pedidoId'));",
+        "  pm.expect(b.pago.transaccion_id).to.eql(pm.environment.get('txId') || pm.collectionVariables.get('txId'));",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Stock sin segundo descuento",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoA}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('sigue en 8', function () { pm.expect(pm.response.json().disponible).to.eql(8); });"
+      ]}}]
+    },
+    {
+      "name": "Pago rechazado",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"usuario_id\": \"{{usuarioId}}\",\n  \"items\": [{\"producto_id\": \"{{productoA}}\", \"cantidad\": 1}],\n  \"pago\": {\"metodo\": \"TARJETA_RECHAZADA\"}\n}"},
+        "url": "{{pedidosUrl}}/api/pedidos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('cancelado', function () {",
+        "  var b = pm.response.json();",
+        "  pm.expect(b.estado).to.eql('CANCELADO');",
+        "  pm.expect(b.pago.estado_pago).to.eql('RECHAZADO');",
+        "});"
+      ]}}]
+    },
+    {
+      "name": "Stock liberado tras el pago rechazado",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoA}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('sigue en 8', function () { pm.expect(pm.response.json().disponible).to.eql(8); });"
+      ]}}]
+    },
+    {
+      "name": "Sin stock",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"usuario_id\": \"{{usuarioId}}\",\n  \"items\": [{\"producto_id\": \"{{productoA}}\", \"cantidad\": 100}],\n  \"pago\": {\"metodo\": \"TARJETA_CREDITO\"}\n}"},
+        "url": "{{pedidosUrl}}/api/pedidos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('rechazado', function () { pm.expect(pm.response.json().estado).to.eql('RECHAZADO'); });"
+      ]}}]
+    },
+    {
+      "name": "Crear producto C con stock",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"nombre\": \"Cable\",\n  \"precio\": \"5.00\",\n  \"categoria_id\": \"cat_audio\",\n  \"categoria_nombre\": \"Audio\",\n  \"marca_id\": \"marca_01\",\n  \"marca_nombre\": \"Acme\",\n  \"stock_inicial\": 4\n}"},
+        "url": "{{catalogoUrl}}/api/productos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "var b = pm.response.json(); pm.environment.set('productoC', b.id); pm.collectionVariables.set('productoC', b.id);"
+      ]}}]
+    },
+    {
+      "name": "Crear producto D sin stock",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"nombre\": \"Adaptador\",\n  \"precio\": \"5.00\",\n  \"categoria_id\": \"cat_audio\",\n  \"categoria_nombre\": \"Audio\",\n  \"marca_id\": \"marca_01\",\n  \"marca_nombre\": \"Acme\",\n  \"stock_inicial\": 0\n}"},
+        "url": "{{catalogoUrl}}/api/productos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "var b = pm.response.json(); pm.environment.set('productoD', b.id); pm.collectionVariables.set('productoD', b.id);"
+      ]}}]
+    },
+    {
+      "name": "Pedido con un item sin stock compensa el otro",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"usuario_id\": \"{{usuarioId}}\",\n  \"items\": [\n    {\"producto_id\": \"{{productoC}}\", \"cantidad\": 1},\n    {\"producto_id\": \"{{productoD}}\", \"cantidad\": 1}\n  ],\n  \"pago\": {\"metodo\": \"TARJETA_CREDITO\"}\n}"},
+        "url": "{{pedidosUrl}}/api/pedidos"
+      },
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('rechazado', function () { pm.expect(pm.response.json().estado).to.eql('RECHAZADO'); });"
+      ]}}]
+    },
+    {
+      "name": "Stock de C intacto",
+      "request": {"method": "GET", "url": "{{catalogoUrl}}/api/productos/{{productoC}}"},
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('sigue en 4', function () { pm.expect(pm.response.json().disponible).to.eql(4); });"
+      ]}}]
+    }
+  ]
+}
