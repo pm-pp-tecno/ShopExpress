@@ -1,7 +1,7 @@
 # ShopExpress — Plan de preparación y desarrollo
 
 **Laboratorio:** Tarea 2 NoSQL 2026 · **Estado:** planificación aprobada; implementación y pruebas pendientes · **Fecha:** 29/10/2026  
-**Documento base:** `Tarea 2 NoSql  2026.pdf` (4 páginas). Este archivo registra decisiones del grupo y sirve de instrucciones para otra IA desarrolladora.
+**Documento base:** `Tarea 2 NoSql  2026.pdf` (4 páginas). Este archivo es el plan a implementar. El recorrido de las decisiones está en `BITACORA.md`.
 
 ## 1. Qué pide la consigna
 
@@ -41,7 +41,7 @@ MongoDB/usuarios   Neo4j  MongoDB/inventario MongoDB/pedidos
                            +--- REST SAGA -----+
 ```
 
-- **Usuarios**: perfil, documento, correo y direcciones en MongoDB. El historial de compras se obtiene del servicio de Pedidos, sin duplicarlo como fuente de verdad.
+- **Usuarios**: perfil, documento, correo y direcciones en MongoDB. `GET /api/usuarios/{usuario_id}` arma el historial consultando a Pedidos. Pedidos es la única fuente; no se copia en el usuario.
 - **Catálogo e Inventario**: **único propietario** del grafo Neo4j y del inventario MongoDB; expone las operaciones de reserva, confirmación y liberación. Otros servicios **no acceden directamente** a sus bases.
 - **Pedidos y Pagos**: persiste pedidos y avance de SAGA en MongoDB; coordina llamadas REST a Usuarios/Catálogo y simula el pago.
 - **Aislamiento:** una instancia compartida de MongoDB con bases lógicas separadas por dominio. No hay transacción distribuida ACID entre Neo4j y MongoDB: las altas parciales deben detectarse y recuperarse.
@@ -78,13 +78,13 @@ Modelar nodos `Producto`, `Categoria`, `Marca`; relaciones `PERTENECE_A`, `FABRI
 {"pedido_id":"ord_98765","usuario_id":"usr_12345","estado":"PROCESANDO","items":[{"producto_id":"prod_001","cantidad":2,"precio_unitario":25.50}],"total":51.00,"pago":{"metodo":"TARJETA_CREDITO","estado_pago":"APROBADO","transaccion_id":"tx_456789"}}
 ```
 
-Direcciones e ítems van **embebidos**; usuario/producto se unen por **referencia** (`usuario_id`, `producto_id`). Guardar precio histórico por ítem. El cliente **no decide** el precio ni el total: el backend los consulta/calcula. Usar centavos enteros o decimal exacto **internamente**, no `float` para calcular dinero.
+Direcciones e ítems van **embebidos**; usuario/producto se unen por **referencia** (`usuario_id`, `producto_id`). Guardar precio histórico por ítem. El cliente **no decide** el precio ni el total: el backend los consulta/calcula con decimal exacto, no con `float`. La respuesta mantiene la forma del anexo.
 
 ## 5. API mínima y reglas transaccionales
 
 | Servicio | Rutas |
 |---|---|
-| Usuarios | `POST /api/usuarios`; `GET /api/usuarios/{usuario_id}` |
+| Usuarios | `POST /api/usuarios`; `GET /api/usuarios/{usuario_id}` (incluye historial leído de Pedidos) |
 | Catálogo | `POST /api/productos`; `GET /api/productos/{producto_id}` (incluye stock) |
 | Pedidos | `POST /api/pedidos` (valida, inicia SAGA y retorna estado/ID) |
 | Catálogo — internas | `POST /api/inventario/reservas`; `POST /api/inventario/reservas/{id}/confirmar`; `POST /api/inventario/reservas/{id}/liberar` |
@@ -98,10 +98,10 @@ Direcciones e ítems van **embebidos**; usuario/producto se unen por **referenci
 2. Reservar cada ítem en Catálogo/Inventario: actualización condicional sobre **un documento MongoDB** (`disponible >= cantidad`), restar cantidad y registrar la reserva en esa misma operación atómica.
 3. Si algún ítem no tiene stock: **liberar las reservas anteriores** y marcar `RECHAZADO`.
 4. Con todo reservado, **simular pago** configurable (`APROBADO`/`RECHAZADO`). Si falla: liberar reservas y marcar `CANCELADO`.
-5. Si se aprueba: confirmar reservas y pedido `CONFIRMADO`.
-6. Ante timeout/caída: persistir el último paso, **reintentar de modo idempotente** y reconciliar al reiniciar; si el pago fue aprobado pero falta confirmar, completar la confirmación o gestionar compensación explícita, **nunca asumir éxito sin verificar**.
+5. Si se aprueba: confirmar reservas y pedido `CONFIRMADO`. Confirmar solo pasa la reserva a `CONFIRMADA`; `disponible` ya se descontó al reservar.
+6. Ante timeout/caída: persistir el último paso y, al reiniciar Pedidos, retomar de forma idempotente. Si el pago quedó aprobado y falta confirmar, completar la confirmación o compensar; no asumir éxito sin verificar.
 
-**Invariantes:** no stock negativo; no doble reserva/liberación; no pedido duplicado al reintentar; pago simulado no se ejecuta dos veces para el mismo intento. En un pedido con múltiples productos, las reservas son **individuales**, no una operación atómica global: SAGA compensa las parciales. Definir un vencimiento y recuperación de reservas abandonadas **sin requerir otro contenedor** (p. ej. recuperación al arrancar y reconciliación periódica dentro del servicio).
+**Invariantes:** no stock negativo; no doble reserva/liberación; no pedido duplicado al reintentar; pago simulado no se ejecuta dos veces para el mismo intento. En un pedido con múltiples productos, las reservas son **individuales**, no una operación atómica global: SAGA compensa las parciales. Una SAGA a medias se retoma al arrancar Pedidos, sin otro proceso ni contenedor.
 
 ## 6. Plan de acción para la IA desarrolladora
 
@@ -121,7 +121,8 @@ shopexpress/
   pedidos-service/       # FastAPI + MongoDB + SAGA/Chain
   tests/                 # Pytest / HTTPX
   postman/               # Colección + entorno local
-  docs/                  # Diagramas y decisiones
+  docs/                  # Diagramas
+  BITACORA.md            # Recorrido de decisiones
   docker-compose.yml
   .env.example
   README.md
